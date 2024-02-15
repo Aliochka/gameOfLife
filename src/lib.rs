@@ -6,9 +6,15 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
+use rand::Rng;
 
-const GRID_SIZE: f32 = 32.0;
-const UPDATE_INTERVAL: instant::Duration = instant::Duration::new(1, 0);
+fn random_bit() -> u32 {
+    let mut rng = rand::thread_rng();
+    rng.gen_range(0..2)
+}
+
+const GRID_SIZE: f32 = 128.0;
+const UPDATE_INTERVAL: instant::Duration = instant::Duration::new(0, 100000);
 const WORKGROUP_SIZE: u8 = 8;
 
 
@@ -141,14 +147,9 @@ impl State {
 
         let mut index: usize = 0;
         while index < cell_state_array_1.len() {
-            cell_state_array_1[index] = 1;
-            // cell_state_array_2[index] = 1;
-            index += 3;
-        }
-        index = 0;
-        while index < cell_state_array_2.len() {
-            cell_state_array_2[index] = (index % 2) as u32;
-            // cell_state_array_2[index] = 0;
+            let random = random_bit();
+            cell_state_array_1[index] = random;
+            cell_state_array_2[index] = random;
             index += 1;
         }
 
@@ -384,10 +385,10 @@ impl State {
                     label: Some("Compute game of life"),
                     timestamp_writes: None,
                 });
-        
+
                 compute_pass.set_pipeline(&self.compute_pipeline);
                 compute_pass.set_bind_group(0, &self.bind_group[(self.step % 2) as usize], &[]);
-        
+
                 let work_group_count = (GRID_SIZE as f64 / WORKGROUP_SIZE as f64).ceil() as u32;
                 compute_pass.dispatch_workgroups(work_group_count, work_group_count, 1);
                 //////////////
@@ -412,14 +413,11 @@ impl State {
             render_pass.set_bind_group(0, &self.bind_group[(self.step % 2) as usize], &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.draw(0..self.num_vertices, 0..GRID_SIZE as u32 * GRID_SIZE as u32);
-        
         }
-    
 
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
-        print!("step :{}", self.step);
         Ok(())
     }
 }

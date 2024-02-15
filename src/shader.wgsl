@@ -20,7 +20,7 @@ fn vs_main(
     var output: VertexOutput;
 
     let i = f32(input.instance);
-    let cell = vec2f(i % grid.x, floor(i/ grid.x));
+    let cell = vec2f(i % grid.x, floor(i / grid.x));
     let state = f32(cellStateIn[input.instance]);
 
     let cellOffset = cell / grid * 2.0;
@@ -34,15 +34,16 @@ fn vs_main(
 // Fragment shader
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let c = input.color / grid;
+    let c = input.color / grid / 2.0;
 
     return vec4<f32>(c, 1.0 - c.x, 1.0);
 }
 
-
 fn cellIndex(cell: vec2u) -> u32 {
-  return cell.y * u32(grid.x) + cell.x;
+  return (cell.y % u32(grid.y)) * u32(grid.x) +
+         (cell.x % u32(grid.x));
 }
+
 
 fn cellActive(x: u32, y: u32) -> u32 {
   return cellStateIn[cellIndex(vec2(x, y))];
@@ -50,13 +51,29 @@ fn cellActive(x: u32, y: u32) -> u32 {
 
 @compute @workgroup_size(8, 8)
 fn compute_main(@builtin(global_invocation_id) cell: vec3u) {
-  // New lines. Flip the cell state every step.
-    cellStateOut[cellIndex(cell.xy)] = u32(1);
+
+  let activeNeighbors = cellActive(cell.x + 1u, cell.y + 1u)+
+                        cellActive(cell.x + 1u, cell.y) +
+                        cellActive(cell.x + 1u, cell.y - 1u) +
+                        cellActive(cell.x, cell.y - 1u) +
+                        cellActive(cell.x - 1u, cell.y - 1u) +
+                        cellActive(cell.x - 1u, cell.y) +
+                        cellActive(cell.x - 1u, cell.y + 1u) +
+                        cellActive(cell.x, cell.y + 1u);
 
 
-  // if (cellStateIn[cellIndex(cell.xy)] == u32(1)) {
-  //   cellStateOut[cellIndex(cell.xy)] = u32(0);
-  // } else {
-  //   cellStateOut[cellIndex(cell.xy)] = u32(1);
-  // }
+  let i = cellIndex(cell.xy);
+
+  // Conway's game of life rules:
+  switch activeNeighbors {
+    case 2u: { // Active cells with 2 neighbors stay active.
+      cellStateOut[i] = cellStateIn[i];
+    }
+    case 3u: { // Cells with 3 neighbors become or stay active.
+      cellStateOut[i] = 1u;
+    }
+    default: { // Cells with < 2 or > 3 neighbors become inactive.
+      cellStateOut[i] = 0u;
+    }
+  }
 }
