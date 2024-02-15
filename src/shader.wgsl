@@ -42,7 +42,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 
 
-
 fn cellIndex(cell: vec2u) -> u32 {
   return cell.y * u32(grid.x) + cell.x;
 }

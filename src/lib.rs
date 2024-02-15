@@ -7,8 +7,8 @@ use winit::{
     window::WindowBuilder,
 };
 
-const GRID_SIZE: f32 = 64.0;
-const UPDATE_INTERVAL: u64 = 200;
+const GRID_SIZE: f32 = 32.0;
+const UPDATE_INTERVAL: u64 = 1000;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -139,15 +139,14 @@ impl State {
         let mut index: usize = 0;
         while index < cell_state_array_1.len() {
             cell_state_array_1[index] = 1;
-            cell_state_array_2[index] = 1;
-
             index += 3;
         }
-        // index = 0;
-        // while index < cell_state_array_2.len() {
-        // cell_state_array_2[index] = (index % 2) as u32;
-        //     index += 1;
-        // }
+        index = 0;
+        while index < cell_state_array_2.len() {
+            cell_state_array_2[index] = (index % 2) as u32;
+            // cell_state_array_2[index] = 0;
+            index += 1;
+        }
 
         let cell_state_buffer = [
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -156,7 +155,7 @@ impl State {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             }),
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("State Buffer"),
+                label: Some("State Buffer 2"),
                 contents: bytemuck::cast_slice(&cell_state_array_2),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             }),
