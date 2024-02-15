@@ -1,4 +1,4 @@
-use std::{thread, time};
+use std::thread;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 use winit::{
@@ -8,7 +8,9 @@ use winit::{
 };
 
 const GRID_SIZE: f32 = 32.0;
-const UPDATE_INTERVAL: u64 = 1000;
+const UPDATE_INTERVAL: instant::Duration = instant::Duration::new(1, 0);
+const WORKGROUP_SIZE: u8 = 8;
+
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -65,6 +67,7 @@ struct State {
     window: Window,
     bind_group: [wgpu::BindGroup; 2],
     step: u32,
+    compute_pipeline: wgpu::ComputePipeline,
 }
 
 impl State {
@@ -73,7 +76,7 @@ impl State {
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            dx12_shader_compiler: Default::default(),
+            ..Default::default()
         });
 
         let surface = unsafe { instance.create_surface(&window) }.unwrap();
@@ -91,7 +94,7 @@ impl State {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     features: wgpu::Features::empty(),
-                    limits: wgpu::Limits::default(),
+                    limits: wgpu::Limits::downlevel_defaults(),
                     label: None,
                 },
                 None,
@@ -139,6 +142,7 @@ impl State {
         let mut index: usize = 0;
         while index < cell_state_array_1.len() {
             cell_state_array_1[index] = 1;
+            // cell_state_array_2[index] = 1;
             index += 3;
         }
         index = 0;
@@ -148,7 +152,7 @@ impl State {
             index += 1;
         }
 
-        let cell_state_buffer = [
+        let cell_state_storage = [
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("State Buffer 1"),
                 contents: bytemuck::cast_slice(&cell_state_array_1),
@@ -160,6 +164,8 @@ impl State {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             }),
         ];
+        queue.write_buffer(&cell_state_storage[0], 0, bytemuck::cast_slice(&cell_state_array_1));
+        queue.write_buffer(&cell_state_storage[1], 0, bytemuck::cast_slice(&cell_state_array_2));
 
         const UNIFORM_ARRAY: [f32; 2] = [GRID_SIZE, GRID_SIZE];
 
@@ -219,11 +225,11 @@ impl State {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: cell_state_buffer[0].as_entire_binding(),
+                        resource: cell_state_storage[0].as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: cell_state_buffer[1].as_entire_binding(),
+                        resource: cell_state_storage[1].as_entire_binding(),
                     },
                 ],
                 label: Some("bind_group"),
@@ -237,11 +243,11 @@ impl State {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: cell_state_buffer[1].as_entire_binding(),
+                        resource: cell_state_storage[1].as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: cell_state_buffer[0].as_entire_binding(),
+                        resource: cell_state_storage[0].as_entire_binding(),
                     },
                 ],
                 label: Some("bind_group"),
@@ -293,6 +299,13 @@ impl State {
             multiview: None,
         });
 
+        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Compute game of Life"),
+            layout: Some(&render_pipeline_layout),
+            module: &shader,
+            entry_point: "compute_main",
+        });
+
         let step = 0;
         Self {
             window,
@@ -307,6 +320,7 @@ impl State {
             num_vertices,
             bind_group,
             step,
+            compute_pipeline,
         }
     }
 
@@ -347,9 +361,9 @@ impl State {
     }
 
     fn update(&mut self) {
-        self.step += 1;
 
-        thread::sleep(time::Duration::from_millis(UPDATE_INTERVAL));
+        thread::sleep(UPDATE_INTERVAL);
+        self.step += 1;
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -364,6 +378,20 @@ impl State {
                 label: Some("Render Encoder"),
             });
 
+            {
+                ///////////
+                let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Compute game of life"),
+                    timestamp_writes: None,
+                });
+        
+                compute_pass.set_pipeline(&self.compute_pipeline);
+                compute_pass.set_bind_group(0, &self.bind_group[(self.step % 2) as usize], &[]);
+        
+                let work_group_count = (GRID_SIZE as f64 / WORKGROUP_SIZE as f64).ceil() as u32;
+                compute_pass.dispatch_workgroups(work_group_count, work_group_count, 1);
+                //////////////
+            }
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -372,19 +400,23 @@ impl State {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(self.clear_color),
-                        store: true,
+                        store: wgpu::StoreOp::Store,
                     },
                 })],
                 depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.bind_group[(self.step % 2) as usize], &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.draw(0..self.num_vertices, 0..GRID_SIZE as u32 * GRID_SIZE as u32);
+        
         }
+    
 
-        // submit will accept anything that implements IntoIter
+
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
         print!("step :{}", self.step);
@@ -399,13 +431,6 @@ pub async fn run() {
 
     let mut state = State::new(window).await;
     event_loop.run(move |event, _, control_flow| {
-        // control_flow.set_wait();
-        // control_flow.set_wait_until(Instant::now() + Duration::from_millis(10000000));
-
-        // control_flow.set_wait_timeout(Duration::from_millis(10000000));
-
-        // control_flow.set_wait();
-
         match event {
             Event::WindowEvent {
                 ref event,
